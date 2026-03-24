@@ -1759,4 +1759,4 @@ task.spawn(function()
             updateBuyIndicators()
         end
     end
-end
+end)
