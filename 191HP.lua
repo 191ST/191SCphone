@@ -5,6 +5,24 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+-- ========== CUSTOM RESPAWN ==========
+local RESPAWN_POINT = CFrame.new(729.86, 3.71, 444.46) * CFrame.Angles(-3.14, 0.01, -3.14)
+
+local function setupCustomRespawn()
+    player.CharacterAdded:Connect(function(character)
+        task.wait(0.1)
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.Anchored = true
+            hrp.CFrame = RESPAWN_POINT
+            task.wait(0.05)
+            hrp.Anchored = false
+        end
+    end)
+end
+
+setupCustomRespawn()
+
 -- ========== AMBIL REMOTE EVENTS ==========
 local remotes = ReplicatedStorage:FindFirstChild("RemoteEvents")
 local storePurchaseRE = remotes and remotes:FindFirstChild("StorePurchase")
