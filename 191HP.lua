@@ -270,7 +270,10 @@ local LOCATIONS = {
     {name = "⚒️ Material", pos = Vector3.new(521.32, 47.79, 617.25), desc = "Storage"},
 }
 
--- ========== TP FUNCTION (LANGSUNG PINDAH) ==========
+-- ========== SAFE ZONE COORDINATE ==========
+local SAFE_ZONE_CFRAME = CFrame.new(537.71, 4.59, -537.09) * CFrame.Angles(-1.20, -1.56, -1.20)
+
+-- ========== TP FUNCTION (ANCHOR/UNANCHOR) ==========
 local function moveVehicle(vehicle, targetPos)
     local anchor = vehicle.PrimaryPart or vehicle:FindFirstChildOfClass("VehicleSeat") or vehicle:FindFirstChildOfClass("BasePart")
     if not anchor then return end
@@ -324,6 +327,241 @@ local function stepTeleport(targetPos)
             hrp.CFrame = CFrame.new(targetPos)
         end
     end
+end
+
+-- ========== TELEPORT TO SAFE ZONE (DENGAN ANCHOR/UNANCHOR + ROTASI) ==========
+local function teleportToSafeZone()
+    local character = player.Character
+    local hum = character and character:FindFirstChildOfClass("Humanoid")
+    if not character or not hum then return false end
+    
+    local seatPart = hum.SeatPart
+    if seatPart then
+        local vehicle = seatPart:FindFirstAncestorOfClass("Model")
+        if vehicle then
+            local anchor = vehicle.PrimaryPart or vehicle:FindFirstChildOfClass("VehicleSeat") or vehicle:FindFirstChildOfClass("BasePart")
+            if anchor then
+                for _,p in ipairs(vehicle:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        pcall(function()
+                            p.AssemblyLinearVelocity = Vector3.zero
+                            p.AssemblyAngularVelocity = Vector3.zero
+                            p.Anchored = true
+                        end)
+                    end
+                end
+                task.wait(0.05)
+                
+                if vehicle.PrimaryPart then
+                    vehicle:SetPrimaryPartCFrame(SAFE_ZONE_CFRAME)
+                else
+                    anchor.CFrame = SAFE_ZONE_CFRAME
+                end
+                task.wait(0.05)
+                
+                for _,p in ipairs(vehicle:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        pcall(function()
+                            p.Anchored = false
+                            p.AssemblyLinearVelocity = Vector3.zero
+                            p.AssemblyAngularVelocity = Vector3.zero
+                        end)
+                    end
+                end
+            end
+            return true
+        end
+    else
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.Anchored = true
+            hrp.CFrame = SAFE_ZONE_CFRAME
+            task.wait(0.05)
+            hrp.Anchored = false
+            return true
+        end
+    end
+    return false
+end
+
+local function teleportToOriginalCFrame(targetCFrame)
+    local character = player.Character
+    local hum = character and character:FindFirstChildOfClass("Humanoid")
+    if not character or not hum then return false end
+    
+    local seatPart = hum.SeatPart
+    if seatPart then
+        local vehicle = seatPart:FindFirstAncestorOfClass("Model")
+        if vehicle then
+            local anchor = vehicle.PrimaryPart or vehicle:FindFirstChildOfClass("VehicleSeat") or vehicle:FindFirstChildOfClass("BasePart")
+            if anchor then
+                for _,p in ipairs(vehicle:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        pcall(function()
+                            p.AssemblyLinearVelocity = Vector3.zero
+                            p.AssemblyAngularVelocity = Vector3.zero
+                            p.Anchored = true
+                        end)
+                    end
+                end
+                task.wait(0.05)
+                
+                if vehicle.PrimaryPart then
+                    vehicle:SetPrimaryPartCFrame(targetCFrame)
+                else
+                    anchor.CFrame = targetCFrame
+                end
+                task.wait(0.05)
+                
+                for _,p in ipairs(vehicle:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        pcall(function()
+                            p.Anchored = false
+                            p.AssemblyLinearVelocity = Vector3.zero
+                            p.AssemblyAngularVelocity = Vector3.zero
+                        end)
+                    end
+                end
+            end
+            return true
+        end
+    else
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.Anchored = true
+            hrp.CFrame = targetCFrame
+            task.wait(0.05)
+            hrp.Anchored = false
+            return true
+        end
+    end
+    return false
+end
+
+-- ========== HP MONITORING & AUTO SAFE TELEPORT ==========
+local hpMonitoringActive = false
+local isInSafeZone = false
+local originalCFrame = nil
+local safeZoneTimerThread = nil
+local currentHumanoid = nil
+local lastHealthPercent = 100
+
+local function onCharacterAdded(character)
+    currentHumanoid = character:WaitForChild("Humanoid")
+    lastHealthPercent = (currentHumanoid.Health / currentHumanoid.MaxHealth) * 100
+    isInSafeZone = false
+    originalCFrame = nil
+    if safeZoneTimerThread then
+        task.cancel(safeZoneTimerThread)
+        safeZoneTimerThread = nil
+    end
+end
+
+if player.Character then
+    onCharacterAdded(player.Character)
+end
+player.CharacterAdded:Connect(onCharacterAdded)
+
+local function saveOriginalPosition()
+    local character = player.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        originalCFrame = hrp.CFrame
+        return true
+    end
+    return false
+end
+
+local function teleportBackToOriginal()
+    if originalCFrame then
+        teleportToOriginalCFrame(originalCFrame)
+        originalCFrame = nil
+    end
+    isInSafeZone = false
+end
+
+local function startSafeZoneTimer()
+    if safeZoneTimerThread then
+        task.cancel(safeZoneTimerThread)
+    end
+    
+    safeZoneTimerThread = task.spawn(function()
+        task.wait(8)
+        if isInSafeZone and hpMonitoringActive then
+            teleportBackToOriginal()
+        end
+        safeZoneTimerThread = nil
+    end)
+end
+
+local function checkHealthAndTeleport()
+    if not hpMonitoringActive then return end
+    if not currentHumanoid or currentHumanoid.Parent == nil then
+        local character = player.Character
+        if character then
+            currentHumanoid = character:FindFirstChildOfClass("Humanoid")
+        end
+        if not currentHumanoid then return end
+    end
+    
+    local currentHealth = currentHumanoid.Health
+    local maxHealth = currentHumanoid.MaxHealth
+    
+    if maxHealth > 0 then
+        local currentPercent = (currentHealth / maxHealth) * 100
+        local percentDropped = lastHealthPercent - currentPercent
+        
+        if percentDropped >= 1 and not isInSafeZone then
+            saveOriginalPosition()
+            if teleportToSafeZone() then
+                isInSafeZone = true
+                startSafeZoneTimer()
+            end
+        end
+        
+        lastHealthPercent = currentPercent
+    end
+end
+
+local function startHPMonitoring()
+    if hpMonitoringActive then return end
+    hpMonitoringActive = true
+    isInSafeZone = false
+    originalCFrame = nil
+    
+    if currentHumanoid then
+        lastHealthPercent = (currentHumanoid.Health / currentHumanoid.MaxHealth) * 100
+    else
+        lastHealthPercent = 100
+    end
+    
+    if safeZoneTimerThread then
+        task.cancel(safeZoneTimerThread)
+        safeZoneTimerThread = nil
+    end
+    
+    task.spawn(function()
+        while hpMonitoringActive do
+            checkHealthAndTeleport()
+            task.wait(0.3)
+        end
+    end)
+end
+
+local function stopHPMonitoring()
+    hpMonitoringActive = false
+    
+    if safeZoneTimerThread then
+        task.cancel(safeZoneTimerThread)
+        safeZoneTimerThread = nil
+    end
+    
+    if isInSafeZone then
+        teleportBackToOriginal()
+    end
+    
+    isInSafeZone = false
+    originalCFrame = nil
 end
 
 -- Buat semua button TP
@@ -511,10 +749,22 @@ ToolStatus.TextXAlignment = Enum.TextXAlignment.Left
 ToolStatus.Font = Enum.Font.GothamBold
 ToolStatus.TextSize = 9
 
+-- HP SAFE STATUS INDICATOR
+local HPSafeStatus = Instance.new("TextLabel")
+HPSafeStatus.Parent = MSLoopContent
+HPSafeStatus.Size = UDim2.new(1,-12,0,16)
+HPSafeStatus.Position = UDim2.new(0,6,0,236)
+HPSafeStatus.BackgroundTransparency = 1
+HPSafeStatus.Text = "🛡️ HP SAFE: INACTIVE"
+HPSafeStatus.TextColor3 = Color3.fromRGB(200,200,200)
+HPSafeStatus.TextXAlignment = Enum.TextXAlignment.Left
+HPSafeStatus.Font = Enum.Font.GothamBold
+HPSafeStatus.TextSize = 9
+
 local MSLoopStartBtn = Instance.new("TextButton")
 MSLoopStartBtn.Parent = MSLoopContent
 MSLoopStartBtn.Size = UDim2.new(0.48,-4,0,32)
-MSLoopStartBtn.Position = UDim2.new(0,6,0,242)
+MSLoopStartBtn.Position = UDim2.new(0,6,0,260)
 MSLoopStartBtn.BackgroundColor3 = Color3.fromRGB(50,150,50)
 MSLoopStartBtn.Text = "▶️ START"
 MSLoopStartBtn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -527,7 +777,7 @@ MSLoopStartCorner.CornerRadius = UDim.new(0,6)
 local MSLoopStopBtn = Instance.new("TextButton")
 MSLoopStopBtn.Parent = MSLoopContent
 MSLoopStopBtn.Size = UDim2.new(0.48,-4,0,32)
-MSLoopStopBtn.Position = UDim2.new(0.52,2,0,242)
+MSLoopStopBtn.Position = UDim2.new(0.52,2,0,260)
 MSLoopStopBtn.BackgroundColor3 = Color3.fromRGB(150,50,50)
 MSLoopStopBtn.Text = "⏹️ STOP"
 MSLoopStopBtn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -540,7 +790,7 @@ MSLoopStopCorner.CornerRadius = UDim.new(0,6)
 local RefreshBtn = Instance.new("TextButton")
 RefreshBtn.Parent = MSLoopContent
 RefreshBtn.Size = UDim2.new(1,-12,0,26)
-RefreshBtn.Position = UDim2.new(0,6,0,280)
+RefreshBtn.Position = UDim2.new(0,6,0,298)
 RefreshBtn.BackgroundColor3 = Color3.fromRGB(60,60,80)
 RefreshBtn.Text = "🔄 REFRESH"
 RefreshBtn.TextColor3 = Color3.fromRGB(200,200,255)
@@ -995,6 +1245,10 @@ local function startMSLoop()
     loopRunning = true
     MSLoopStatus.Text = "▶️ LOOP RUNNING"
     MSLoopStatus.TextColor3 = Color3.fromRGB(100,255,100)
+    HPSafeStatus.Text = "🛡️ HP SAFE: ACTIVE"
+    HPSafeStatus.TextColor3 = Color3.fromRGB(100,255,100)
+    
+    startHPMonitoring()
     
     task.spawn(function()
         while loopRunning do
@@ -1084,7 +1338,11 @@ local function startMSLoop()
         MSLoopStepLabel.Text = "Stopped"
         MSLoopTimer.Text = "Timer: 0s"
         ToolStatus.Text = "Tool: -"
+        HPSafeStatus.Text = "🛡️ HP SAFE: INACTIVE"
+        HPSafeStatus.TextColor3 = Color3.fromRGB(200,200,200)
         updateBuyIndicators()
+        
+        stopHPMonitoring()
     end)
 end
 
@@ -1150,7 +1408,6 @@ local function startAutoBuy()
                     BuyStatusValue.Text = "⚠️ Gagal " .. i .. "/" .. amount
                 end
                 
-                -- Delay 0.8-1.2 detik untuk aman
                 task.wait(0.8 + math.random() * 0.4)
             end
             
@@ -1339,7 +1596,10 @@ createBlinkButton(MSSafetyContent, "⬅️ BLINK MUNDUR", "Mundur 5 studs", Colo
 -- ========== CONNECT BUTTONS ==========
 CloseBtn.MouseButton1Click:Connect(function()
     if autoSellRunning then stopAutoSell() end
-    if loopRunning then loopRunning = false end
+    if loopRunning then 
+        loopRunning = false
+        stopHPMonitoring()
+    end
     if autoBuyRunning then stopAutoBuy() end
     ScreenGui:Destroy()
 end)
@@ -1347,7 +1607,10 @@ end)
 MSLoopStartBtn.MouseButton1Click:Connect(function()
     if not loopRunning then task.spawn(startMSLoop) end
 end)
-MSLoopStopBtn.MouseButton1Click:Connect(function() loopRunning = false end)
+MSLoopStopBtn.MouseButton1Click:Connect(function() 
+    loopRunning = false
+    stopHPMonitoring()
+end)
 RefreshBtn.MouseButton1Click:Connect(updateBuyIndicators)
 
 BuyStartBtn.MouseButton1Click:Connect(startAutoBuy)
